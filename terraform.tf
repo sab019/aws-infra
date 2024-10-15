@@ -6,16 +6,19 @@ provider "aws" {
 # VPC principal
 resource "aws_vpc" "main" {
   cidr_block = "10.74.0.0/16"
+  enable_dns_hostnames = true
+  enable_dns_support   = true
 
   tags = {
     Name = "Main VPC"
   }
 }
 
-# Sous-réseaux
+# Sous-réseaux du VPC principal
 resource "aws_subnet" "bastion" {
   vpc_id     = aws_vpc.main.id
   cidr_block = "10.74.1.0/24"
+  availability_zone = "us-east-1a"
 
   tags = {
     Name = "Bastion Subnet"
@@ -25,6 +28,7 @@ resource "aws_subnet" "bastion" {
 resource "aws_subnet" "web1" {
   vpc_id     = aws_vpc.main.id
   cidr_block = "10.74.2.0/24"
+  availability_zone = "us-east-1b"
 
   tags = {
     Name = "Web1 Subnet"
@@ -34,13 +38,14 @@ resource "aws_subnet" "web1" {
 resource "aws_subnet" "web2" {
   vpc_id     = aws_vpc.main.id
   cidr_block = "10.74.3.0/24"
+  availability_zone = "us-east-1c"
 
   tags = {
     Name = "Web2 Subnet"
   }
 }
 
-# Internet Gateway
+# Internet Gateway pour le VPC principal
 resource "aws_internet_gateway" "main" {
   vpc_id = aws_vpc.main.id
 
@@ -68,42 +73,83 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 
-# Route table pour le sous-réseau web1
-resource "aws_route_table" "web1" {
+# Route table pour les sous-réseaux privés
+resource "aws_route_table" "private" {
   vpc_id = aws_vpc.main.id
 
   tags = {
-    Name = "Web1 Route Table"
+    Name = "Private Route Table"
   }
 }
 
 resource "aws_route_table_association" "web1" {
   subnet_id      = aws_subnet.web1.id
-  route_table_id = aws_route_table.web1.id
+  route_table_id = aws_route_table.private.id
 }
 
-# Peering VPC entre web1 et bastion
-resource "aws_vpc_peering_connection" "web1_to_bastion" {
+resource "aws_route_table_association" "web2" {
+  subnet_id      = aws_subnet.web2.id
+  route_table_id = aws_route_table.private.id
+}
+
+# Nouveau VPC pour la machine ICMP
+resource "aws_vpc" "icmp_vpc" {
+  cidr_block = "10.75.0.0/16"
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+
+  tags = {
+    Name = "ICMP VPC"
+  }
+}
+
+# Sous-réseau pour la machine ICMP
+resource "aws_subnet" "icmp" {
+  vpc_id     = aws_vpc.icmp_vpc.id
+  cidr_block = "10.75.1.0/24"
+  availability_zone = "us-east-1a"
+
+  tags = {
+    Name = "ICMP Subnet"
+  }
+}
+
+# Peering VPC entre le VPC principal et le VPC ICMP
+resource "aws_vpc_peering_connection" "main_to_icmp" {
   vpc_id        = aws_vpc.main.id
-  peer_vpc_id   = aws_vpc.main.id
+  peer_vpc_id   = aws_vpc.icmp_vpc.id
   auto_accept   = true
 
   tags = {
-    Name = "Peering between Web1 and Bastion subnets"
+    Name = "Peering between Main and ICMP VPCs"
   }
 }
 
 # Routes pour le peering
-resource "aws_route" "web1_to_bastion" {
-  route_table_id            = aws_route_table.web1.id
-  destination_cidr_block    = aws_subnet.bastion.cidr_block
-  vpc_peering_connection_id = aws_vpc_peering_connection.web1_to_bastion.id
+resource "aws_route" "main_to_icmp" {
+  route_table_id            = aws_route_table.public.id
+  destination_cidr_block    = aws_vpc.icmp_vpc.cidr_block
+  vpc_peering_connection_id = aws_vpc_peering_connection.main_to_icmp.id
 }
 
-resource "aws_route" "bastion_to_web1" {
-  route_table_id            = aws_route_table.public.id
-  destination_cidr_block    = aws_subnet.web1.cidr_block
-  vpc_peering_connection_id = aws_vpc_peering_connection.web1_to_bastion.id
+resource "aws_route" "icmp_to_main" {
+  route_table_id            = aws_route_table.icmp.id
+  destination_cidr_block    = aws_vpc.main.cidr_block
+  vpc_peering_connection_id = aws_vpc_peering_connection.main_to_icmp.id
+}
+
+# Route table pour le VPC ICMP
+resource "aws_route_table" "icmp" {
+  vpc_id = aws_vpc.icmp_vpc.id
+
+  tags = {
+    Name = "ICMP Route Table"
+  }
+}
+
+resource "aws_route_table_association" "icmp" {
+  subnet_id      = aws_subnet.icmp.id
+  route_table_id = aws_route_table.icmp.id
 }
 
 # Groupe de sécurité pour le bastion
@@ -121,27 +167,11 @@ resource "aws_security_group" "bastion" {
   }
 
   ingress {
-    from_port   = 3128
-    to_port     = 3128
-    protocol    = "tcp"
-    cidr_blocks = [aws_vpc.main.cidr_block]
-    description = "Squid proxy access"
-  }
-
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "HTTP for HAProxy"
-  }
-
-  ingress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "HTTPS for HAProxy"
+    from_port   = -1
+    to_port     = -1
+    protocol    = "icmp"
+    cidr_blocks = [aws_vpc.icmp_vpc.cidr_block]
+    description = "ICMP from ICMP VPC"
   }
 
   egress {
@@ -190,6 +220,32 @@ resource "aws_security_group" "web" {
   }
 }
 
+# Groupe de sécurité pour la machine ICMP
+resource "aws_security_group" "icmp" {
+  name        = "icmp_sg"
+  description = "Security group for ICMP machine"
+  vpc_id      = aws_vpc.icmp_vpc.id
+
+  ingress {
+    from_port   = -1
+    to_port     = -1
+    protocol    = "icmp"
+    cidr_blocks = [aws_vpc.main.cidr_block]
+    description = "ICMP from Main VPC"
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "ICMP SG"
+  }
+}
+
 # Instance EC2 pour le bastion
 resource "aws_instance" "bastion" {
   ami           = "ami-0747bdcabd34c712a"
@@ -199,16 +255,9 @@ resource "aws_instance" "bastion" {
   associate_public_ip_address = true
   key_name      = "ssh-key"
 
-  user_data = templatefile("bastion_setup.sh", {
-    web1_ip = aws_instance.web1.private_ip,
-    web2_ip = aws_instance.web2.private_ip
-  })
-
   tags = {
     Name = "Bastion Host"
   }
-
-  depends_on = [aws_instance.web1, aws_instance.web2]
 }
 
 # Instances EC2 pour les serveurs web
@@ -218,11 +267,6 @@ resource "aws_instance" "web1" {
   subnet_id     = aws_subnet.web1.id
   vpc_security_group_ids = [aws_security_group.web.id]
   key_name      = "ssh-key"
-
-  user_data = templatefile("web1_setup.sh", {
-    server_number = 1,
-    bastion_private_ip = aws_subnet.bastion.cidr_block
-  })
 
   tags = {
     Name = "Web1 Server"
@@ -236,13 +280,21 @@ resource "aws_instance" "web2" {
   vpc_security_group_ids = [aws_security_group.web.id]
   key_name      = "ssh-key"
 
-  user_data = templatefile("web2_setup.sh", {
-    server_number = 2,
-    bastion_private_ip = aws_subnet.bastion.cidr_block
-  })
-
   tags = {
     Name = "Web2 Server"
+  }
+}
+
+# Instance EC2 pour la machine ICMP
+resource "aws_instance" "icmp" {
+  ami           = "ami-0747bdcabd34c712a"
+  instance_type = "t2.micro"
+  subnet_id     = aws_subnet.icmp.id
+  vpc_security_group_ids = [aws_security_group.icmp.id]
+  key_name      = "ssh-key"
+
+  tags = {
+    Name = "ICMP Machine"
   }
 }
 
@@ -260,4 +312,9 @@ output "web1_private_ip" {
 output "web2_private_ip" {
   value = aws_instance.web2.private_ip
   description = "The private IP address of Web Server 2"
+}
+
+output "icmp_private_ip" {
+  value = aws_instance.icmp.private_ip
+  description = "The private IP address of the ICMP machine"
 }
