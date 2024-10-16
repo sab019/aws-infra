@@ -165,7 +165,7 @@ resource "aws_instance" "web1" {
   subnet_id                   = aws_subnet.web.id
   vpc_security_group_ids      = [aws_security_group.web.id]
   key_name                    = "ssh-key"
-
+   
  # user_data = templatefile("web_setup.sh", {
  #   server_number       = 1,
  #   bastion_private_ip  = aws_instance.bastion.private_ip
@@ -183,10 +183,10 @@ resource "aws_instance" "web2" {
   vpc_security_group_ids      = [aws_security_group.web.id]
   key_name                    = "ssh-key"
 
- # user_data = templatefile("web_setup.sh", {
- #   server_number       = 2,
- #   bastion_private_ip  = aws_instance.bastion.private_ip
- # })
+#  user_data = templatefile("web_setup.sh", {
+#    server_number       = 2,
+#    bastion_private_ip  = aws_instance.bastion.private_ip
+#  })
 
   tags = {
     Name = "Web Server 2"
@@ -253,6 +253,35 @@ resource "aws_security_group" "web" {
   }
 }
 
+# Internet Gateway pour le VPC intranet (où se trouve le VPN)
+resource "aws_internet_gateway" "intranet_igw" {
+  vpc_id = aws_vpc.intranet_vpc.id
+
+  tags = {
+    Name = "Intranet IGW"
+  }
+}
+
+# Route table pour le sous-réseau VPN public
+resource "aws_route_table" "vpn_public" {
+  vpc_id = aws_vpc.intranet_vpc.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.intranet_igw.id
+  }
+
+  tags = {
+    Name = "VPN Public Route Table"
+  }
+}
+
+# Associer la route au sous-réseau VPN public
+resource "aws_route_table_association" "vpn_public_assoc" {
+  subnet_id      = aws_subnet.vpn_public.id
+  route_table_id = aws_route_table.vpn_public.id
+}
+
 # Instance EC2 pour le serveur VPN
 resource "aws_instance" "vpn" {
   ami                         = "ami-0747bdcabd34c712a"
@@ -261,6 +290,8 @@ resource "aws_instance" "vpn" {
   vpc_security_group_ids      = [aws_security_group.vpn.id]
   associate_public_ip_address  = true
   key_name                    = "ssh-key"
+  
+  user_data = templatefile("vpn_setup.sh", {})
 
   tags = {
     Name = "VPN Server"
@@ -279,6 +310,15 @@ resource "aws_security_group" "vpn" {
     protocol    = "udp"  # Port pour OpenVPN
     cidr_blocks = ["0.0.0.0/0"]
     description = "OpenVPN access"
+  }
+
+  # Ajouter cette section pour autoriser SSH (port 22)
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]  # Remplacez par une plage d'adresses IP plus restrictive si nécessaire
+    description = "SSH access"
   }
 
   egress {
