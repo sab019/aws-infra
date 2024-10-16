@@ -5,7 +5,7 @@ provider "aws" {
 
 # VPC principal
 resource "aws_vpc" "main" {
-  cidr_block = "10.74.0.0/16"
+  cidr_block           = "10.74.0.0/16"
   enable_dns_hostnames = true
   enable_dns_support   = true
 
@@ -14,10 +14,10 @@ resource "aws_vpc" "main" {
   }
 }
 
-# Sous-réseaux du VPC principal
+# Sous-réseau du bastion
 resource "aws_subnet" "bastion" {
-  vpc_id     = aws_vpc.main.id
-  cidr_block = "10.74.1.0/24"
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = "10.74.1.0/24"
   availability_zone = "us-east-1a"
 
   tags = {
@@ -25,23 +25,14 @@ resource "aws_subnet" "bastion" {
   }
 }
 
-resource "aws_subnet" "web1" {
-  vpc_id     = aws_vpc.main.id
-  cidr_block = "10.74.2.0/24"
+# Sous-réseau pour les serveurs web (web1 et web2)
+resource "aws_subnet" "web" {
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = "10.74.2.0/24"
   availability_zone = "us-east-1b"
 
   tags = {
-    Name = "Web1 Subnet"
-  }
-}
-
-resource "aws_subnet" "web2" {
-  vpc_id     = aws_vpc.main.id
-  cidr_block = "10.74.3.0/24"
-  availability_zone = "us-east-1c"
-
-  tags = {
-    Name = "Web2 Subnet"
+    Name = "Web Subnet"
   }
 }
 
@@ -82,74 +73,124 @@ resource "aws_route_table" "private" {
   }
 }
 
-resource "aws_route_table_association" "web1" {
-  subnet_id      = aws_subnet.web1.id
+resource "aws_route_table_association" "web" {
+  subnet_id      = aws_subnet.web.id
   route_table_id = aws_route_table.private.id
 }
 
-resource "aws_route_table_association" "web2" {
-  subnet_id      = aws_subnet.web2.id
-  route_table_id = aws_route_table.private.id
-}
+# Cluster RDS pour la base de données
+#resource "aws_rds_cluster" "intranet_db_backup" {
+#  cluster_identifier       = "intranet-db-backup"
+#  engine                   = "aurora-postgresql"
+#  engine_version	   = "12.19"
+#  master_username          = "dbadmin"
+#  master_password          = "DBPassword123!"
+#  backup_retention_period   = 7
+#  preferred_backup_window   = "02:00-03:00"
+#  skip_final_snapshot       = true
+#
+#  tags = {
+#    Name = "Intranet DB Backup"
+#  }
+#}
 
-# Nouveau VPC pour la machine ICMP
-resource "aws_vpc" "icmp_vpc" {
-  cidr_block = "10.75.0.0/16"
+# Instance RDS pour le cluster
+#resource "aws_rds_cluster_instance" "intranet_db_backup_instance" {
+#  cluster_identifier = aws_rds_cluster.intranet_db_backup.id
+#  instance_class     = "db.r4.large"
+#  engine             = "aurora-postgresql"
+#  engine_version     = "12.19"  # Spécifiez la version appropriée
+#  
+#  tags = {
+#    Name = "Intranet DB Backup Instance"
+#  }
+#}
+
+# VPC pour l'Intranet avec sous-réseaux
+resource "aws_vpc" "intranet_vpc" {
+  cidr_block           = "10.76.0.0/16"
   enable_dns_hostnames = true
   enable_dns_support   = true
 
   tags = {
-    Name = "ICMP VPC"
+    Name = "Intranet VPC"
   }
 }
 
-# Sous-réseau pour la machine ICMP
-resource "aws_subnet" "icmp" {
-  vpc_id     = aws_vpc.icmp_vpc.id
-  cidr_block = "10.75.1.0/24"
+# Sous-réseau pour le serveur VPN (public)
+resource "aws_subnet" "vpn_public" {
+  vpc_id            = aws_vpc.intranet_vpc.id
+  cidr_block        = "10.76.1.0/24"
   availability_zone = "us-east-1a"
 
   tags = {
-    Name = "ICMP Subnet"
+    Name = "VPN Public Subnet"
   }
 }
 
-# Peering VPC entre le VPC principal et le VPC ICMP
-resource "aws_vpc_peering_connection" "main_to_icmp" {
-  vpc_id        = aws_vpc.main.id
-  peer_vpc_id   = aws_vpc.icmp_vpc.id
-  auto_accept   = true
+# Sous-réseau pour les bases de données (privé)
+resource "aws_subnet" "db_private" {
+  vpc_id            = aws_vpc.intranet_vpc.id
+  cidr_block        = "10.76.2.0/24"
+  availability_zone = "us-east-1b"
 
   tags = {
-    Name = "Peering between Main and ICMP VPCs"
+    Name = "DB Private Subnet"
   }
 }
 
-# Routes pour le peering
-resource "aws_route" "main_to_icmp" {
-  route_table_id            = aws_route_table.public.id
-  destination_cidr_block    = aws_vpc.icmp_vpc.cidr_block
-  vpc_peering_connection_id = aws_vpc_peering_connection.main_to_icmp.id
-}
+# Instance EC2 pour le bastion
+resource "aws_instance" "bastion" {
+  ami                         = "ami-0747bdcabd34c712a"
+  instance_type               = "t2.micro"
+  subnet_id                   = aws_subnet.bastion.id
+  vpc_security_group_ids      = [aws_security_group.bastion.id]
+  associate_public_ip_address  = true
+  key_name                    = "ssh-key"
 
-resource "aws_route" "icmp_to_main" {
-  route_table_id            = aws_route_table.icmp.id
-  destination_cidr_block    = aws_vpc.main.cidr_block
-  vpc_peering_connection_id = aws_vpc_peering_connection.main_to_icmp.id
-}
-
-# Route table pour le VPC ICMP
-resource "aws_route_table" "icmp" {
-  vpc_id = aws_vpc.icmp_vpc.id
+  user_data = templatefile("bastion_setup.sh", {
+    web1_ip = aws_instance.web1.private_ip,
+    web2_ip = aws_instance.web2.private_ip  # Both web servers in the same subnet
+  })
 
   tags = {
-    Name = "ICMP Route Table"
+    Name = "Bastion Host"
   }
 }
 
-resource "aws_route_table_association" "icmp" {
-  subnet_id      = aws_subnet.icmp.id
-  route_table_id = aws_route_table.icmp.id
+# Instances EC2 pour les serveurs web
+resource "aws_instance" "web1" {
+  ami                         = "ami-0747bdcabd34c712a"
+  instance_type               = "t2.micro"
+  subnet_id                   = aws_subnet.web.id
+  vpc_security_group_ids      = [aws_security_group.web.id]
+  key_name                    = "ssh-key"
+
+ # user_data = templatefile("web1_setup.sh", {
+ #   server_number       = 1,
+ #   bastion_private_ip  = aws_instance.bastion.private_ip
+ # })	
+
+  tags = {
+    Name = "Web Server 1"
+  }
+}
+
+resource "aws_instance" "web2" {
+  ami                         = "ami-0747bdcabd34c712a"
+  instance_type               = "t2.micro"
+  subnet_id                   = aws_subnet.web.id  # Moved to the same subnet as web1
+  vpc_security_group_ids      = [aws_security_group.web.id]
+  key_name                    = "ssh-key"
+
+ # user_data = templatefile("web2_setup.sh", {
+ #   server_number       = 2,
+ #   bastion_private_ip  = aws_instance.bastion.private_ip
+ # })
+
+  tags = {
+    Name = "Web Server 2"
+  }
 }
 
 # Groupe de sécurité pour le bastion
@@ -164,14 +205,6 @@ resource "aws_security_group" "bastion" {
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
     description = "SSH access"
-  }
-
-  ingress {
-    from_port   = -1
-    to_port     = -1
-    protocol    = "icmp"
-    cidr_blocks = [aws_vpc.icmp_vpc.cidr_block]
-    description = "ICMP from ICMP VPC"
   }
 
   egress {
@@ -193,19 +226,19 @@ resource "aws_security_group" "web" {
   vpc_id      = aws_vpc.main.id
 
   ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
+    from_port      = 80
+    to_port        = 80
+    protocol       = "tcp"
     security_groups = [aws_security_group.bastion.id]
-    description = "HTTP from bastion"
+    description    = "HTTP from bastion"
   }
 
   ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
+    from_port      = 22
+    to_port        = 22
+    protocol       = "tcp"
     security_groups = [aws_security_group.bastion.id]
-    description = "SSH from bastion"
+    description    = "SSH from bastion"
   }
 
   egress {
@@ -220,18 +253,32 @@ resource "aws_security_group" "web" {
   }
 }
 
-# Groupe de sécurité pour la machine ICMP
-resource "aws_security_group" "icmp" {
-  name        = "icmp_sg"
-  description = "Security group for ICMP machine"
-  vpc_id      = aws_vpc.icmp_vpc.id
+# Instance EC2 pour le serveur VPN
+resource "aws_instance" "vpn" {
+  ami                         = "ami-0747bdcabd34c712a"
+  instance_type               = "t2.micro"
+  subnet_id                   = aws_subnet.vpn_public.id
+  vpc_security_group_ids      = [aws_security_group.vpn.id]
+  associate_public_ip_address  = true
+  key_name                    = "ssh-key"
+
+  tags = {
+    Name = "VPN Server"
+  }
+}
+
+# Groupe de sécurité pour le serveur VPN
+resource "aws_security_group" "vpn" {
+  name        = "vpn_sg"
+  description = "Security group for VPN server"
+  vpc_id      = aws_vpc.intranet_vpc.id
 
   ingress {
-    from_port   = -1
-    to_port     = -1
-    protocol    = "icmp"
-    cidr_blocks = [aws_vpc.main.cidr_block]
-    description = "ICMP from Main VPC"
+    from_port   = 1194
+    to_port     = 1194
+    protocol    = "udp"  # Port pour OpenVPN
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "OpenVPN access"
   }
 
   egress {
@@ -242,79 +289,7 @@ resource "aws_security_group" "icmp" {
   }
 
   tags = {
-    Name = "ICMP SG"
+    Name = "VPN SG"
   }
 }
 
-# Instance EC2 pour le bastion
-resource "aws_instance" "bastion" {
-  ami           = "ami-0747bdcabd34c712a"
-  instance_type = "t2.micro"
-  subnet_id     = aws_subnet.bastion.id
-  vpc_security_group_ids = [aws_security_group.bastion.id]
-  associate_public_ip_address = true
-  key_name      = "ssh-key"
-
-  tags = {
-    Name = "Bastion Host"
-  }
-}
-
-# Instances EC2 pour les serveurs web
-resource "aws_instance" "web1" {
-  ami           = "ami-0747bdcabd34c712a"
-  instance_type = "t2.micro"
-  subnet_id     = aws_subnet.web1.id
-  vpc_security_group_ids = [aws_security_group.web.id]
-  key_name      = "ssh-key"
-
-  tags = {
-    Name = "Web1 Server"
-  }
-}
-
-resource "aws_instance" "web2" {
-  ami           = "ami-0747bdcabd34c712a"
-  instance_type = "t2.micro"
-  subnet_id     = aws_subnet.web2.id
-  vpc_security_group_ids = [aws_security_group.web.id]
-  key_name      = "ssh-key"
-
-  tags = {
-    Name = "Web2 Server"
-  }
-}
-
-# Instance EC2 pour la machine ICMP
-resource "aws_instance" "icmp" {
-  ami           = "ami-0747bdcabd34c712a"
-  instance_type = "t2.micro"
-  subnet_id     = aws_subnet.icmp.id
-  vpc_security_group_ids = [aws_security_group.icmp.id]
-  key_name      = "ssh-key"
-
-  tags = {
-    Name = "ICMP Machine"
-  }
-}
-
-# Outputs
-output "bastion_public_ip" {
-  value = aws_instance.bastion.public_ip
-  description = "The public IP address of the bastion host"
-}
-
-output "web1_private_ip" {
-  value = aws_instance.web1.private_ip
-  description = "The private IP address of Web Server 1"
-}
-
-output "web2_private_ip" {
-  value = aws_instance.web2.private_ip
-  description = "The private IP address of Web Server 2"
-}
-
-output "icmp_private_ip" {
-  value = aws_instance.icmp.private_ip
-  description = "The private IP address of the ICMP machine"
-}
