@@ -4,8 +4,8 @@ echo "Starting user_data script for Web Server"
 
 # Configuration du proxy
 echo "Configuring proxy settings"
-echo 'Acquire::http::Proxy "http://${bastion_private_ip}:3128";' > /etc/apt/apt.conf.d/00proxy
-echo 'Acquire::https::Proxy "http://${bastion_private_ip}:3128";' >> /etc/apt/apt.conf.d/00proxy
+echo "Acquire::http::Proxy \"http://${bastion_private_ip}:3128\";" > /etc/apt/apt.conf.d/00proxy
+echo "Acquire::https::Proxy \"http://${bastion_private_ip}:3128\";" >> /etc/apt/apt.conf.d/00proxy
 
 # Configuration de l'environnement pour utiliser le proxy
 echo "export http_proxy=http://${bastion_private_ip}:3128" >> /etc/environment
@@ -20,3 +20,4 @@ systemctl enable apache2
 echo "<h1>This is Web Server ${server_number}</h1>" > /var/www/html/index.html
 
 echo "User_data script for Web Server completed"
+

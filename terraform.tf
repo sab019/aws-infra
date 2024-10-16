@@ -166,7 +166,7 @@ resource "aws_instance" "web1" {
   vpc_security_group_ids      = [aws_security_group.web.id]
   key_name                    = "ssh-key"
 
- # user_data = templatefile("web1_setup.sh", {
+ # user_data = templatefile("web_setup.sh", {
  #   server_number       = 1,
  #   bastion_private_ip  = aws_instance.bastion.private_ip
  # })	
@@ -183,7 +183,7 @@ resource "aws_instance" "web2" {
   vpc_security_group_ids      = [aws_security_group.web.id]
   key_name                    = "ssh-key"
 
- # user_data = templatefile("web2_setup.sh", {
+ # user_data = templatefile("web_setup.sh", {
  #   server_number       = 2,
  #   bastion_private_ip  = aws_instance.bastion.private_ip
  # })
