@@ -43,4 +43,12 @@ sudo su
 dans /home/ubuntu copier le .ovpn pour l'acces au vpn  
 
 
+===========================================================
+
+Etape 3 
+
+ajouter la key rsa ssh-key dans /etc/ssl/ sur la bdd
+
+chmod 600 ssh-key
+
 

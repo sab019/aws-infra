@@ -333,12 +333,55 @@ resource "aws_instance" "db" {
   vpc_security_group_ids      = [aws_security_group.db.id]
   key_name                    = "ssh-key"
 
-  user_data = templatefile("mysql_setup.sh", {})
+  user_data = templatefile("mysql_setup.sh", {
+    db_backup_private_ip = aws_instance.db_backup.private_ip
+  })
 
   tags = {
     Name = "DB Server"
   }
 }
+
+# Instance EC2 pour le serveur de backup bdd
+resource "aws_instance" "db_backup" {
+  ami                         = "ami-0747bdcabd34c712a"
+  instance_type               = "t2.micro"
+  subnet_id                   = aws_subnet.db_private.id  # Sous-réseau privé pour la base de données
+  vpc_security_group_ids      = [aws_security_group.db.id]
+  key_name                    = "ssh-key"
+
+  tags = {
+    Name = "DB-backup Server"
+  }
+}
+
+# Groupe de sécurité pour le serveur de base de données
+resource "aws_security_group" "db_backup" {
+  name        = "db_backup_sg"
+  description = "Security group for backup bdd server"
+  vpc_id      = aws_vpc.intranet_vpc.id
+
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["10.76.0.0/16"]  # SSH access from within the VPC
+    description = "SSH access from within the VPC"
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "DB_BACKUP SG"
+  }
+}
+
 
 # Groupe de sécurité pour le serveur de base de données
 resource "aws_security_group" "db" {
