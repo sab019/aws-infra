@@ -86,27 +86,37 @@ systemctl enable apache2
 cat <<EOL > /var/www/html/index.php
 <h1>This is Web Server intranet</h1>
 <?php
+
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
 // Configuration de la base de données
 $host = 'localhost';
 $dbname = 'test_db';  // Nom de la base de données
 $username = 'root';   // Nom d'utilisateur MySQL
-$password = 'root';       // Mot de passe MySQL
+$password = 'root';   // Mot de passe MySQL
 
 try {
     // Connexion à la base de données avec PDO
     $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8", $username, $password);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
+    // Requête SQL pour récupérer les données
     $sql = 'SELECT * FROM test_table;';
     $stmt = $pdo->query($sql);
 
     // Vérification s'il y a des résultats
+    if ($stmt->rowCount() > 0) {
         echo '<ul>';
         // Boucle à travers chaque utilisateur et affichage dans une liste HTML
         while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-            echo '<li>' . htmlspecialchars($row['name']) . '</li>';
+            echo '<li>' . htmlspecialchars($row['name']) . ' - ' . htmlspecialchars($row['email']) . '</li>';
         }
         echo '</ul>';
+    } else {
+        echo 'Aucun résultat trouvé.';
+    }
 
 } catch (PDOException $e) {
     // Gestion des erreurs de connexion ou de requête
