@@ -88,5 +88,5 @@ sed -i 's/#PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config
 sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
 echo "AllowTcpForwarding yes" >> /etc/ssh/sshd_config
 systemctl restart ssh
-
+systemctl restart squid
 echo "User_data script completed"

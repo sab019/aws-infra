@@ -1,6 +1,7 @@
 provider "aws" {
   region  = "us-east-1"
   profile = "default"
+  version = "~> 5.0"
 }
 
 # VPC principal
@@ -65,7 +66,7 @@ resource "aws_route_table_association" "public" {
 }
 
 # Route table pour les sous-réseaux privés
-resource "aws_route_table" "private" {
+resource "aws_route_table" "private_main" {
   vpc_id = aws_vpc.main.id
 
   tags = {
@@ -75,36 +76,8 @@ resource "aws_route_table" "private" {
 
 resource "aws_route_table_association" "web" {
   subnet_id      = aws_subnet.web.id
-  route_table_id = aws_route_table.private.id
+  route_table_id = aws_route_table.private_main.id
 }
-
-# Cluster RDS pour la base de données
-#resource "aws_rds_cluster" "intranet_db_backup" {
-#  cluster_identifier       = "intranet-db-backup"
-#  engine                   = "aurora-postgresql"
-#  engine_version	   = "12.19"
-#  master_username          = "dbadmin"
-#  master_password          = "DBPassword123!"
-#  backup_retention_period   = 7
-#  preferred_backup_window   = "02:00-03:00"
-#  skip_final_snapshot       = true
-#
-#  tags = {
-#    Name = "Intranet DB Backup"
-#  }
-#}
-
-# Instance RDS pour le cluster
-#resource "aws_rds_cluster_instance" "intranet_db_backup_instance" {
-#  cluster_identifier = aws_rds_cluster.intranet_db_backup.id
-#  instance_class     = "db.r4.large"
-#  engine             = "aurora-postgresql"
-#  engine_version     = "12.19"  # Spécifiez la version appropriée
-#  
-#  tags = {
-#    Name = "Intranet DB Backup Instance"
-#  }
-#}
 
 # VPC pour l'Intranet avec sous-réseaux
 resource "aws_vpc" "intranet_vpc" {
@@ -165,11 +138,8 @@ resource "aws_instance" "web1" {
   subnet_id                   = aws_subnet.web.id
   vpc_security_group_ids      = [aws_security_group.web.id]
   key_name                    = "ssh-key"
-   
- # user_data = templatefile("web_setup.sh", {
- #   server_number       = 1,
- #   bastion_private_ip  = aws_instance.bastion.private_ip
- # })	
+
+  user_data = templatefile("web_setup.sh", {})
 
   tags = {
     Name = "Web Server 1"
@@ -183,10 +153,7 @@ resource "aws_instance" "web2" {
   vpc_security_group_ids      = [aws_security_group.web.id]
   key_name                    = "ssh-key"
 
-#  user_data = templatefile("web_setup.sh", {
-#    server_number       = 2,
-#    bastion_private_ip  = aws_instance.bastion.private_ip
-#  })
+  user_data = templatefile("web_setup.sh", {})
 
   tags = {
     Name = "Web Server 2"
@@ -198,6 +165,31 @@ resource "aws_security_group" "bastion" {
   name        = "bastion_sg"
   description = "Security group for bastion host"
   vpc_id      = aws_vpc.main.id
+
+  ingress {
+  from_port   = 3128
+  to_port     = 3128
+  protocol    = "tcp"
+  cidr_blocks = ["10.74.2.0/24"]  # Autoriser les machines web à accéder au proxy
+  description = "HTTP Proxy access from web servers"
+  }
+
+  ingress {
+  from_port   = 80
+  to_port     = 80
+  protocol    = "tcp"
+  cidr_blocks = ["0.0.0.0/0"]  # Autoriser les machines web à accéder au proxy
+  description = "HTTP Proxy access from web servers"
+  }
+
+  ingress {
+  from_port   = 443
+  to_port     = 443
+  protocol    = "tcp"
+  cidr_blocks = ["0.0.0.0/0"]  # Autoriser les machines web à accéder au proxy
+  description = "HTTP Proxy access from web servers"
+  }
+
 
   ingress {
     from_port   = 22
@@ -290,7 +282,7 @@ resource "aws_instance" "vpn" {
   vpc_security_group_ids      = [aws_security_group.vpn.id]
   associate_public_ip_address  = true
   key_name                    = "ssh-key"
-  
+
   user_data = templatefile("vpn_setup.sh", {})
 
   tags = {
@@ -331,5 +323,89 @@ resource "aws_security_group" "vpn" {
   tags = {
     Name = "VPN SG"
   }
+}
+
+# Instance EC2 pour la base de données dans le sous-réseau privé du VPC Intranet
+resource "aws_instance" "db" {
+  ami                         = "ami-0747bdcabd34c712a"
+  instance_type               = "t2.micro"
+  subnet_id                   = aws_subnet.db_private.id  # Sous-réseau privé pour la base de données
+  vpc_security_group_ids      = [aws_security_group.db.id]
+  key_name                    = "ssh-key"
+
+  user_data = templatefile("mysql_setup.sh", {})
+
+  tags = {
+    Name = "DB Server"
+  }
+}
+
+# Groupe de sécurité pour le serveur de base de données
+resource "aws_security_group" "db" {
+  name        = "db_sg"
+  description = "Security group for database server"
+  vpc_id      = aws_vpc.intranet_vpc.id
+
+  ingress {
+    from_port   = 3306
+    to_port     = 3306
+    protocol    = "tcp"
+    cidr_blocks = ["10.76.0.0/16"]  # Restrict to the Intranet VPC IP range
+    description = "MySQL access from within the Intranet VPC"
+  }
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["10.76.0.0/16"]  # SSH access from within the VPC
+    description = "SSH access from within the VPC"
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "DB SG"
+  }
+}
+
+# Elastic IP pour la passerelle NAT
+resource "aws_eip" "nat" {
+  vpc = true
+}
+
+# Création de la passerelle NAT
+resource "aws_nat_gateway" "main" {
+  allocation_id = aws_eip.nat.id
+  subnet_id     = aws_subnet.vpn_public.id  # Doit être dans le sous-réseau public
+
+  tags = {
+    Name = "Main NAT Gateway"
+  }
+}
+
+# Route table pour les sous-réseaux privés
+resource "aws_route_table" "private_intranet" {
+  vpc_id = aws_vpc.intranet_vpc.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    nat_gateway_id = aws_nat_gateway.main.id  # Route vers la passerelle NAT
+  }
+
+  tags = {
+    Name = "Private Route Table"
+  }
+}
+
+# Association de la route au sous-réseau privé
+resource "aws_route_table_association" "db_private" {
+  subnet_id      = aws_subnet.db_private.id
+  route_table_id = aws_route_table.private_intranet.id
 }
 
