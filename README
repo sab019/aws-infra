@@ -1,0 +1,46 @@
+Etape 1
+
+1.1)
+
+transfer de la key rsa vers le bastion :
+scp -i ../ssh-key.pem ../ssh-key.pem ubuntu@ip-pub-bastion:~
+ssh -i ../ssh-key.pem ubuntu@ip-pub-bastion
+
+-------------------------------------------
+
+1.2)
+
+Connexion sur les serveurs web (actions a faire sur les 2 serveur web)
+
+ssh -i ssh-key.pem ubuntu@ip-pv-webserver
+sudo su 
+cd /
+./setup_web.sh
+
+Entrer ip privée bastion 
+entrée numero du serveur web 
+
+-------------------------------------------
+
+1.3)
+
+restart des service haproxy et squid sur le bastion :
+
+systemctl restart squid haproxy
+
+==========================================================
+
+Etape 2
+
+configuration du vpn :
+
+ssh -i ssh-key.pem ubuntu@ip-pub-vpn
+
+cd /
+sudo su
+./openvpn-install.sh
+
+dans /home/ubuntu copier le .ovpn pour l'acces au vpn  
+
+
+
