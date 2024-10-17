@@ -83,7 +83,7 @@ apt install php-mysql -y
 systemctl start apache2
 systemctl enable apache2
 
-cat <<EOL > /var/www/index.php
+cat <<EOL > /var/www/html/index.php
 <h1>This is Web Server intranet</h1>
 <?php
 // Configuration de la base de données
@@ -114,5 +114,5 @@ try {
 }
 ?>
 EOL
-
+rm /var/www/html/index.html
 echo "User_data script for Web Server completed"
