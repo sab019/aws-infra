@@ -44,6 +44,14 @@ refresh_pattern -i (/cgi-bin/|\?) 0     0%      0
 refresh_pattern .               0       20%     4320
 EOT
 
+echo "config ssl"
+openssl req -x509 -newkey rsa:2048 -keyout haproxy.key -out haproxy.crt -days 365 -nodes \
+-subj "/CN=localhost"
+
+cat haproxy.crt haproxy.key > /etc/ssl/haproxy.pem
+
+chmod 640 /etc/ssl/haproxy.pem
+
 echo "Configuring HAProxy"
 cat <<EOT > /etc/haproxy/haproxy.cfg
 global
@@ -65,8 +73,9 @@ defaults
     timeout client  50000
     timeout server  50000
 
-frontend http_front
-    bind *:80
+frontend https_frontend
+    bind *:443 ssl crt /etc/ssl/haproxy.pem
+    mode http
     default_backend http_back
 
 backend http_back
