@@ -1,54 +1,60 @@
-Etape 1
 
-1.1)
+# Étape 1 : Transfert et configuration initiale
 
-transfer de la key rsa vers le bastion :
-scp -i ../ssh-key.pem ../ssh-key.pem ubuntu@ip-pub-bastion:~
-ssh -i ../ssh-key.pem ubuntu@ip-pub-bastion
+## 1.1) Transfert de la clé RSA vers le bastion
 
--------------------------------------------
+Transférer la clé RSA vers le bastion :
 
-1.2)
+`scp -i ../ssh-key.pem ../ssh-key.pem ubuntu@ip-pub-bastion:~`
 
-Connexion sur les serveurs web (actions a faire sur les 2 serveur web)
+Se connecter au bastion :
 
-ssh -i ssh-key.pem ubuntu@ip-pv-webserver
-sudo su 
-cd /
-./setup_web.sh
+`ssh -i ../ssh-key.pem ubuntu@ip-pub-bastion`
 
-Entrer ip privée bastion 
-entrée numero du serveur web 
+## 1.2) Connexion sur les serveurs web
+Se connecter à chaque serveur web (répétez cette 
+procédure sur les deux serveurs) :
 
--------------------------------------------
+`ssh -i ssh-key.pem ubuntu@ip-pv-webserver`
 
-1.3)
+Passer en mode superutilisateur :
+`sudo su`
 
-restart des service haproxy et squid sur le bastion :
+Accéder à la racine du serveur :
+`cd /`
 
-systemctl restart squid haproxy
+Exécuter le script de configuration :
+`./setup_web.sh`
 
-==========================================================
+Lors de l'exécution du script, entrer l'IP privée du bastion et le numéro du serveur web lorsque demandé.
 
-Etape 2
+## 1.3) Redémarrer les services HAProxy et Squid sur le bastion
 
-configuration du vpn :
+Sur le bastion, redémarrer les services Squid et HAProxy :
 
-ssh -i ssh-key.pem ubuntu@ip-pub-vpn
+`systemctl restart squid haproxy`
 
-cd /
-sudo su
-./openvpn-install.sh
+# Étape 2 : Configuration du VPN
 
-dans /home/ubuntu copier le .ovpn pour l'acces au vpn  
+Se connecter au serveur VPN :
 
+`ssh -i ssh-key.pem ubuntu@ip-pub-vpn`
 
-===========================================================
+Passer en mode superutilisateur :
+`sudo su`
 
-Etape 3 
+Accéder à la racine du serveur :
+`cd /`
 
-ajouter la key rsa ssh-key dans /etc/ssl/ sur la bdd
+Exécuter le script d'installation OpenVPN :
+`./openvpn-install.sh`
 
-chmod 600 ssh-key
+Après l'installation, copier le fichier .ovpn dans le répertoire /home/ubuntu pour l'accès au VPN.
 
+# Étape 3 : Ajouter la clé RSA SSH sur la base de données
 
+Copier la clé RSA dans le répertoire /etc/ssl/ sur le serveur de la base de données.
+
+Modifier les permissions de la clé pour la sécuriser :
+
+`chmod 600 /etc/ssl/ssh-key`
